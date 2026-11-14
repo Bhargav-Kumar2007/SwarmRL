@@ -14,6 +14,7 @@ import mujoco
 import mujoco.viewer
 
 from environment_generator import ProceduralEnvironmentGenerator
+from thermal import get_thermal_contacts
 from drone_model import (
     Drone,
     Obstacle,
@@ -39,6 +40,13 @@ NUM_RUBBLE_ZONES = 50            # Disaster rubble clusters (heavy concentration
 NUM_RUBBLE_PER_ZONE = 30         # Pieces per cluster (Total: 1,500 rubble pieces)
 NUM_TREES = 900                  # Urban parks, street avenues, forest patches
 NUM_POLES = 350                  # Streetlights, utility poles, telecom towers
+AMBIENT_TEMP_C = 18.0
+NUM_FIRE_ZONES = 30
+NUM_COLD_ZONES = 12
+COLD_ZONE_DELTA_C = (-10.0, -4.0)
+NUM_HUMANS = 150
+FAINT_SIGNAL_RADIUS = 50.0
+CONFIRM_RADIUS = 10.0
 
 SAFE_STARTING_RADIUS = 100.0     # 200m x 200m clear takeoff plaza at origin (0, 0)
 # =============================================================================
@@ -94,6 +102,11 @@ class DroneSimulator:
         num_poles: int = NUM_POLES,
         seed: int = ENVIRONMENT_SEED,
         safe_radius: float = SAFE_STARTING_RADIUS,
+        ambient_temp_c: float = AMBIENT_TEMP_C,
+        num_fire_zones: int = NUM_FIRE_ZONES,
+        num_cold_zones: int = NUM_COLD_ZONES,
+        cold_zone_delta_c: tuple = COLD_ZONE_DELTA_C,
+        num_humans: int = NUM_HUMANS,
     ):
         self.scene_path = scene_path
         self.seed = seed
@@ -116,8 +129,18 @@ class DroneSimulator:
             num_poles=num_poles,
             seed=seed,
             safe_radius=safe_radius,
+            ambient_temp_c=ambient_temp_c,
+            num_fire_zones=num_fire_zones,
+            num_cold_zones=num_cold_zones,
+            cold_zone_delta_c=cold_zone_delta_c,
+            num_humans=num_humans,
         )
         gen_obstacles = generator.export_to_file(self.scene_path)
+        self.fires = generator.fires
+        self.humans = generator.humans
+        self.cold_zones = generator.cold_zones
+        self.local_ambient_temp = generator.local_ambient_temp
+        self.total_humans_confirmed = 0
 
         # Convert to runtime Obstacle objects for detection
         self.obstacles: List[Obstacle] = []
@@ -376,11 +399,15 @@ class DroneSimulator:
         coll_entity: Optional[str],
         prox_alert: bool,
         prox_drone: Optional[str],
+        thermal_contacts: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Renders formatted terminal telemetry matching specifications with fixed line padding."""
         coll_str = f"COLLISION DETECTED ({coll_entity})" if is_colliding else "NO"
         prox_str = f"ALERT! Closer than 10m to {prox_drone}" if prox_alert else "OK (> 10m)"
         effective_speed = drone.speed * self.sprint_multiplier
+        thermal_contacts = thermal_contacts or {"faint": [], "confirmed": [], "fire_alerts": []}
+        faint_humans = [c for c in thermal_contacts["faint"] if c.get("type") != "fire"]
+        nearest = faint_humans[0] if faint_humans else None
 
         hud = [
             "--------------------------------",
@@ -430,6 +457,11 @@ class DroneSimulator:
             "Sprint : Hold CTRL or F for 5x Speed Boost across 10 km map",
             "Actions: N/P (Spawn D02), M (Spawn D03), TAB (Switch Pilot), R (Reset), ESC (Quit)",
         ])
+        hud.extend([f"Ambient temperature: {self.local_ambient_temp(drone.pos):.1f} C",
+                    f"Thermal faint contacts: {len(faint_humans)}" + (f" (nearest {nearest['id']} {nearest['distance']:.1f} m)" if nearest else ""),
+                    f"Confirmed humans nearby: {len(thermal_contacts['confirmed'])}",
+                    f"Fire alerts (<25 m): {len(thermal_contacts['fire_alerts'])}",
+                    f"Humans confirmed total: {self.total_humans_confirmed} / {len(self.humans)}"])
 
         # Pad every line to 72 characters so it completely overwrites previous console text
         padded_lines = [f"{line:<72}" for line in hud]
@@ -488,6 +520,9 @@ class DroneSimulator:
 
                     # 3. Inter-drone detection (100m radius)
                     nearby = get_nearby_drones(self.current_drone, self.drones)
+                    thermal_contacts = get_thermal_contacts(self.current_drone, self.humans, self.fires,
+                                                            self.obstacles, self.local_ambient_temp)
+                    self.total_humans_confirmed = sum(h.confirmed for h in self.humans)
 
                     # 4. Obstacle detection (vectorized pre-filter + exact surface distance)
                     nearest_obs, obs_dist, obs_rel = get_nearest_obstacle(
@@ -518,6 +553,7 @@ class DroneSimulator:
                             coll_name,
                             prox_alert,
                             prox_drone,
+                            thermal_contacts,
                         )
                         last_hud_time = now
 

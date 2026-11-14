@@ -54,7 +54,18 @@ NUM_RUBBLE_ZONES = 50            # Disaster rubble clusters (heavy concentration
 NUM_RUBBLE_PER_ZONE = 30         # Pieces per cluster (Total: 1,500 rubble pieces)
 NUM_TREES = 900                  # Urban parks, street avenues, forest patches
 NUM_POLES = 350                  # Streetlights, utility poles, telecom towers
+AMBIENT_TEMP_C = 18.0            # Baseline air/surface temperature
+NUM_FIRE_ZONES = 30              # Each zone contains 1–4 fire sources
+NUM_COLD_ZONES = 12              # Park, forest, and shaded cold pockets
+COLD_ZONE_DELTA_C = (-10.0, -4.0)
+NUM_HUMANS = 150                 # Victims, including two plaza demo targets
+FAINT_SIGNAL_RADIUS = 50.0       # Warm blob contact radius (m)
+CONFIRM_RADIUS = 10.0            # Classified human radius (m)
 ```
+
+## Thermal Search Model
+
+The seeded map includes ground, indoor, and rooftop fires, cold park pockets, and static human victims. A drone receives a faint human contact within **50 m** and confirms the victim within **10 m**, subject to line of sight. Indoor victims and fires are detectable only when the drone is over the parent building footprint (expanded by 2 m). Strong local fire heat can mask a human's faint signal. Fires appear as non-colliding visual geoms and produce alerts within 25 m. Two demo victims are placed at `(30, 0, 0.9)` and `(8, 5, 0.9)`.
 
 ---
 

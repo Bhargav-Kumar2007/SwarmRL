@@ -6,6 +6,7 @@ seed reproducibility, safe starting area, typed obstacle sensing, and collision 
 
 import sys
 import os
+import time
 import numpy as np
 import mujoco
 
@@ -17,6 +18,8 @@ from drone_model import (
     get_nearest_obstacle,
     check_collisions,
 )
+from entities import Fire, Human
+from thermal import get_thermal_contacts
 
 
 def run_tests():
@@ -146,8 +149,52 @@ def run_tests():
     assert prox_alert and prox_id == "D02", f"Expected proximity alert with D02, got {prox_alert}, {prox_id}"
     print("  Collisions (Terrain, Building) and Inter-Drone Separation (<10m) verified.")
 
+    # 9. Thermal detection radii, LOS, indoor access, masking, and determinism.
+    print("[Test 9] Thermal contacts, masking, indoor access, and seeded entities...")
+    thermal_drone = Drone(id="D01", pos=np.array([0., 0., 2.]))
+    clear = lambda _p: 18.0
+    for distance, expected in ((49., 1), (51., 0), (10., 1)):
+        victim = Human("Boundary", np.array([distance, 0., 2.]))
+        result = get_thermal_contacts(thermal_drone, [victim], [], [], clear)
+        assert len(result["faint"]) + len(result["confirmed"]) == expected
+        if distance == 10.:
+            assert len(result["confirmed"]) == 1
+    wall = Obstacle("Wall", "Building", np.array([15., 0., 5.]), "box", np.array([2., 20., 10.]))
+    blocked = get_thermal_contacts(thermal_drone, [Human("Blocked", np.array([30., 0., 2.]))], [], [wall], clear)
+    assert not blocked["faint"] and not blocked["confirmed"]
+    inside = Human("Inside", np.array([4., 0., 2.]), indoor=True, parent_building="Room")
+    room = Obstacle("Room", "Building", np.array([10., 0., 5.]), "box", np.array([20., 20., 10.]))
+    thermal_drone.set_position(-5., 0., 2.)
+    assert not get_thermal_contacts(thermal_drone, [inside], [], [room], clear)["faint"]
+    thermal_drone.set_position(10., 0., 2.)
+    thermal_drone.set_position(10., 0., 2.)
+    assert get_thermal_contacts(thermal_drone, [inside], [], [room], clear)["confirmed"]
+    masked = Human("Masked", np.array([20., 0., 2.]))
+    hot = Fire("Hot", np.array([20., 1., 2.]), 10., 800., 1.)
+    masked_result = get_thermal_contacts(Drone(id="D01", pos=np.array([0., 0., 2.])), [masked], [hot], [], lambda _p: 900.)
+    assert not any(c["id"] == "Masked" for c in masked_result["faint"])
+    gen_a = ProceduralEnvironmentGenerator(seed=12345); gen_a.generate()
+    gen_b = ProceduralEnvironmentGenerator(seed=12345); gen_b.generate()
+    gen_c = ProceduralEnvironmentGenerator(seed=54321); gen_c.generate()
+    signature = lambda g: ([(tuple(f.pos), f.radius_m) for f in g.fires], [tuple(h.pos) for h in g.humans],
+                           [(tuple(z.pos), z.delta_c) for z in g.cold_zones])
+    assert signature(gen_a) == signature(gen_b) and signature(gen_a) != signature(gen_c)
+    assert all(not (abs(f.pos[0]) < 100 and abs(f.pos[1]) < 100) for f in gen_a.fires)
+    print("  Thermal radius, LOS, indoor restriction, masking, and seeded entity checks passed.")
+
+    # 10. Report a representative sensing/collision frame budget at ground zero.
+    bench_drone = Drone(id="D01", pos=np.array([260., 160., 30.]))
+    thermal_ms = []
+    for _ in range(20):
+        started = time.perf_counter()
+        get_thermal_contacts(bench_drone, gen_a.humans, gen_a.fires, runtime_obs, gen_a.local_ambient_temp)
+        get_nearest_obstacle(bench_drone, runtime_obs)
+        check_collisions(bench_drone, runtime_obs, [bench_drone])
+        thermal_ms.append((time.perf_counter() - started) * 1000.0)
+    print(f"[Test 10] Sensing/collision budget: mean {np.mean(thermal_ms):.2f} ms, max {max(thermal_ms):.2f} ms (target 16.6 ms).")
+
     print("==================================================")
-    print(" ALL 8 TEST SUITES PASSED PERFECTLY!")
+    print(" ALL 10 TEST SUITES PASSED PERFECTLY!")
     print("==================================================")
 
 

@@ -9,6 +9,7 @@ import os
 from dataclasses import dataclass
 from typing import List, Tuple, Dict, Any, Optional
 import numpy as np
+from entities import Fire, Human, ColdZone
 
 
 @dataclass
@@ -39,6 +40,11 @@ class ProceduralEnvironmentGenerator:
         seed: int = 12345,
         safe_radius: float = 100.0,
         shadow_size: int = 2048,
+        ambient_temp_c: float = 18.0,
+        num_fire_zones: int = 30,
+        num_cold_zones: int = 12,
+        cold_zone_delta_c: Tuple[float, float] = (-10.0, -4.0),
+        num_humans: int = 150,
     ):
         self.env_size = env_size
         self.half_size = env_size / 2.0  # 5,000 m
@@ -50,9 +56,30 @@ class ProceduralEnvironmentGenerator:
         self.seed = seed
         self.safe_radius = safe_radius  # 200m x 200m safe box centered at (0, 0)
         self.shadow_size = shadow_size
+        self.ambient_temp_c = ambient_temp_c
+        self.num_fire_zones = num_fire_zones
+        self.num_cold_zones = num_cold_zones
+        self.cold_zone_delta_c = cold_zone_delta_c
+        self.num_humans = num_humans
 
         self.rng = np.random.default_rng(seed)
         self.obstacles: List[GeneratedObstacle] = []
+        self.fires: List[Fire] = []
+        self.humans: List[Human] = []
+        self.cold_zones: List[ColdZone] = []
+
+    def local_ambient_temp(self, pos: np.ndarray) -> float:
+        """Ambient temperature with Gaussian fire and cold-pocket influence."""
+        p = np.asarray(pos, dtype=np.float64)
+        temp = self.ambient_temp_c
+        for zone in self.cold_zones:
+            distance = np.linalg.norm(p[:2] - zone.pos[:2])
+            temp += zone.delta_c * np.exp(-0.5 * (distance / max(zone.radius_m, 1.0)) ** 2)
+        for fire in self.fires:
+            distance = np.linalg.norm(p - fire.pos)
+            temp += min(100.0, (fire.temp_c - self.ambient_temp_c) * fire.intensity *
+                        np.exp(-0.5 * (distance / max(fire.radius_m * 5.0, 2.0)) ** 2))
+        return float(temp)
 
     def is_in_safe_zone(self, x: float, y: float, clearance: float = 20.0) -> bool:
         """Ensures the 200m x 200m area around origin (0, 0) remains clear."""
@@ -66,6 +93,9 @@ class ProceduralEnvironmentGenerator:
           (mjcf_xml_content, list_of_generated_obstacles)
         """
         self.obstacles.clear()
+        self.fires.clear()
+        self.humans.clear()
+        self.cold_zones.clear()
         self.rng = np.random.default_rng(self.seed)
 
         # 1. District Layout & Disaster Ground-Zero Zones across the 10km x 10km world
@@ -517,6 +547,73 @@ class ProceduralEnvironmentGenerator:
         # =========================================================================
         # 6. ASSEMBLE FULL MUJOCO XML (10 km x 10 km)
         # =========================================================================
+        # Thermal features share this generator's seeded stream, but remain separate
+        # from the obstacle list and therefore from all collision queries.
+        building_list = [o for o in self.obstacles if o.obs_type == "Building"]
+        rubble_list = [o for o in self.obstacles if o.obs_type == "Rubble"]
+        tree_list = [o for o in self.obstacles if o.obs_type == "Tree"]
+        fire_xml, human_xml = [], []
+        for zone_i in range(self.num_fire_zones):
+            count = int(self.rng.integers(1, 5))
+            anchor = rubble_list[int(self.rng.integers(len(rubble_list)))].pos if rubble_list else np.array([250., 150., 0.])
+            for _ in range(count):
+                roll = self.rng.random()
+                indoor = roll >= 0.60 and roll < 0.90 and bool(building_list)
+                rooftop = roll >= 0.90 and bool(building_list)
+                parent = None
+                if indoor or rooftop:
+                    b = building_list[int(self.rng.integers(len(building_list)))]
+                    parent = b.name
+                    fx = b.pos[0] + self.rng.uniform(-b.size_params[0] * 0.4, b.size_params[0] * 0.4)
+                    fy = b.pos[1] + self.rng.uniform(-b.size_params[1] * 0.4, b.size_params[1] * 0.4)
+                    fz = (b.pos[2] + self.rng.uniform(-b.size_params[2] * 0.35, b.size_params[2] * 0.35)) if indoor else b.size_params[2] + 0.5
+                else:
+                    fx, fy = anchor[0] + self.rng.normal(0, 25), anchor[1] + self.rng.normal(0, 25)
+                    fz = 1.0
+                if self.is_in_safe_zone(fx, fy, 0.0):
+                    fx = 115.0
+                cls = int(self.rng.choice(3, p=[0.50, 0.35, 0.15]))
+                ranges = [(0.5, 2.0, 300, 500), (2.0, 6.0, 500, 700), (6.0, 15.0, 700, 900)][cls]
+                radius, temp = self.rng.uniform(*ranges[:2]), self.rng.uniform(*ranges[2:])
+                fire = Fire(f"Fire_{len(self.fires)+1:03d}", np.array([fx, fy, fz]), radius, temp,
+                            float(self.rng.uniform(0.35, 1.0)), indoor, parent)
+                self.fires.append(fire)
+                fire_xml.append(f'    <body name="{fire.id}" pos="{fx:.2f} {fy:.2f} {fz:.2f}"><geom name="{fire.id}_halo" type="sphere" size="{radius*1.8:.2f}" rgba="1 0.12 0.015 0.20" contype="0" conaffinity="0"/><geom name="{fire.id}_core" type="sphere" size="{radius:.2f}" rgba="1 0.42 0.03 0.78" contype="0" conaffinity="0"/></body>')
+
+        # Cold pockets use tree patches as park anchors where possible.
+        for i in range(self.num_cold_zones):
+            tree = tree_list[int(self.rng.integers(len(tree_list)))] if tree_list else None
+            x, y = (tree.pos[0], tree.pos[1]) if tree is not None else (self.rng.uniform(-4000, 4000), self.rng.uniform(-4000, 4000))
+            if self.is_in_safe_zone(x, y, 0):
+                x += 120
+            self.cold_zones.append(ColdZone(f"Cold_{i+1:02d}", np.array([x, y, 0.0]),
+                                            float(self.rng.uniform(40, 120)), float(self.rng.uniform(*self.cold_zone_delta_c))))
+
+        # Random victims are kept on open ground or placed on a building's ground floor.
+        for i in range(max(0, self.num_humans - 2)):
+            indoor = bool(building_list) and self.rng.random() < 0.15
+            parent = None
+            if indoor:
+                b = building_list[int(self.rng.integers(len(building_list)))]
+                x = b.pos[0] + self.rng.uniform(-b.size_params[0]*0.4, b.size_params[0]*0.4)
+                y = b.pos[1] + self.rng.uniform(-b.size_params[1]*0.4, b.size_params[1]*0.4)
+                parent = b.name
+            else:
+                src = rubble_list[int(self.rng.integers(len(rubble_list)))].pos if rubble_list else np.zeros(3)
+                x, y = src[0] + self.rng.normal(0, 40), src[1] + self.rng.normal(0, 40)
+            if self.is_in_safe_zone(x, y, 0):
+                x = 120.0
+            posture = str(self.rng.choice(["standing", "lying"], p=[0.35, 0.65]))
+            human = Human(f"Human_{i+1:03d}", np.array([x, y, 0.9 if posture == "standing" else 0.25]), posture,
+                          surface_temp_c=float(self.rng.uniform(31.0, 34.0)), indoor=indoor, parent_building=parent)
+            self.humans.append(human)
+        for hid, x, y in (("Human_Demo_01", 30.0, 0.0), ("Human_Demo_02", 8.0, 5.0)):
+            self.humans.append(Human(hid, np.array([x, y, 0.9])))
+        for human in self.humans:
+            height = 1.25 if human.posture == "standing" else 0.22
+            euler = "0 90 0" if human.posture == "lying" else "0 0 0"
+            human_xml.append(f'    <body name="{human.id}" pos="{human.pos[0]:.2f} {human.pos[1]:.2f} {human.pos[2]:.2f}" euler="{euler}"><geom name="{human.id}_torso" type="capsule" fromto="0 0 0 0 0 {height:.2f}" size="0.18" rgba="0.78 0.58 0.36 1" contype="0" conaffinity="0"/><geom name="{human.id}_head" type="sphere" pos="0 0 {height+0.15:.2f}" size="0.15" rgba="0.88 0.69 0.50 1" contype="0" conaffinity="0"/></body>')
+
         xml_content = f"""<mujoco model="congested_disaster_city_10km">
   <compiler angle="degree" coordinate="local"/>
   <option gravity="0 0 0" timestep="0.0166667"/>
@@ -643,6 +740,10 @@ class ProceduralEnvironmentGenerator:
 
     <!-- ==================== PROCEDURAL POLES ({len(pole_xml_lines)}) ==================== -->
 {chr(10).join(pole_xml_lines)}
+
+    <!-- Thermal fires and static human victims; non-colliding -->
+{chr(10).join(fire_xml)}
+{chr(10).join(human_xml)}
 
   </worldbody>
 </mujoco>
