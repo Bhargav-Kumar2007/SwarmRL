@@ -1,0 +1,4 @@
+policy,discovered,confirmed,collision_events,coverage,mission_time_s,redundant_fraction,episode_reward_mean,env_sps
+random,0.0,0.0,65.0,0.0176,240.0,0.9167,-143.264,167.9
+rule,2.0,2.0,0.0,0.042,240.0,0.1087,10.935,57.9
+mappo,0.0,0.0,0.0,0.0957,240.0,0.3094,0.785,102.4

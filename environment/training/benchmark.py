@@ -1,6 +1,6 @@
 """Profile actual simulation throughput (no torch, no MuJoCo).
 
-  python training/benchmark.py --drones 2 5 10 25 50 --steps 300
+  python environment/training/benchmark.py --drones 2 5 10 25 50 --steps 300
 """
 import argparse
 import csv

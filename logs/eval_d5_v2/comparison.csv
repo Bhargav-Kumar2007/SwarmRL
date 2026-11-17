@@ -1,0 +1,4 @@
+policy,discovered,confirmed,collision_events,coverage,mission_time_s,redundant_fraction,episode_reward_mean,proximity_steps,collision_steps,r_discover,r_confirm,r_coop,r_personal_faint,r_approach,r_new_cell,r_revisit,r_collision,r_separation,r_fire,r_idle,r_time,r_safe,r_team_bonus,env_sps
+random,0.9,0.1,67.35,0.0376,240.0,0.9165,-91.4215,0.6,452.9,0.6,0.5,0.0,0.011,0.0,0.537,-0.743,-89.124,-0.018,-0.12,-0.102,-6.0,2.219,0.818,118.0
+rule,1.9,1.75,37.8,0.0914,240.0,0.5672,-106.8453,0.0,596.45,1.6,8.75,0.015,0.036,0.0,1.417,-0.985,-119.29,0.0,0.0,-0.441,-6.0,2.161,5.891,37.1
+mappo,1.6,1.55,2.7,0.0704,240.0,0.7959,-7.2072,314.6,22.3,1.3,7.75,0.0,0.026,0.0,1.074,-0.695,-4.294,-9.438,-0.066,-4.193,-6.0,2.265,5.062,69.4

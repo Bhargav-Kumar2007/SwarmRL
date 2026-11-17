@@ -9,17 +9,17 @@ from dataclasses import dataclass, fields
 
 @dataclass
 class RewardWeights:
-    discover: float = 2.0            # team-first faint discovery of a victim
-    confirm: float = 6.0             # team-first confirmation (< 10 m, LOS)
+    discover: float = 5.0            # team-first faint discovery of a victim
+    confirm: float = 25.0             # team-first confirmation (< 10 m, LOS)
     coop_confirm: float = 1.5        # confirming a victim a teammate found first
     personal_faint: float = 0.1      # own first faint contact (already team-known)
     new_cell: float = 0.08           # team-first visit of a 25 m grid cell
     personal_new_cell: float = 0.02  # own first visit of a team-known cell
     revisit: float = -0.01           # re-entering a team-explored cell
     collision_building: float = -1.0   # per colliding step
-    collision_rubble: float = -0.5     # per colliding step
-    collision_tree: float = -0.5       # per colliding step
-    collision_pole: float = -0.5       # per colliding step
+    collision_rubble: float = -0.9     # per colliding step
+    collision_tree: float = -0.9     # per colliding step
+    collision_pole: float = -0.8       # per colliding step
     collision_terrain: float = -1.0    # per colliding step
     separation: float = -0.15        # per step closer than min_separation
     safe_step: float = 0.002         # clean step (no collision, no proximity)

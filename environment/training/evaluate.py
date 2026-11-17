@@ -1,7 +1,11 @@
 """Baselines vs trained MAPPO. Exports per-episode CSV, comparison CSV + graphs.
 
-  python training/evaluate.py --compare --drones 2 --episodes 10 \
-      --checkpoint checkpoints/d2_seed0/final.pt
+  python environment/training/evaluate.py --compare --drones 5 --episodes 20 \
+      --checkpoint checkpoints/d5_bc_short/final.pt --seed 1000
+
+  # fast single-policy diagnostic with full reward breakdown:
+  python environment/training/evaluate.py --policy mappo --drones 5 --episodes 10 \
+      --checkpoint checkpoints/d5_bc_short/final.pt --seed 1000 --run-name diag_components
 """
 import argparse
 import csv
@@ -18,7 +22,15 @@ from rl.swarm_env import SwarmEnv, EnvConfig
 from rl.observations import OBS_DIM, GLOBAL_STATE_DIM
 
 METRIC_KEYS = ["discovered", "confirmed", "collision_events", "coverage",
-               "mission_time_s", "redundant_fraction", "episode_reward_mean"]
+               "mission_time_s", "redundant_fraction", "episode_reward_mean",
+               "proximity_steps", "collision_steps"]
+
+# Episode reward-component sums are accumulated across ALL drones inside the
+# env; dividing by num_drones gives per-drone contributions that sum exactly to
+# episode_reward_mean. Missing keys (e.g. 'approach' on older reward files) -> 0.
+COMPONENT_KEYS = ["discover", "confirm", "coop", "personal_faint", "approach",
+                  "new_cell", "revisit", "collision", "separation", "fire",
+                  "idle", "time", "safe", "team_bonus"]
 
 
 def random_policy(obs, env, rng, agent=None):
@@ -70,7 +82,6 @@ def rule_policy(obs, env, rng, agent=None):
     norms = np.linalg.norm(acts, axis=1, keepdims=True)
     return acts / np.maximum(norms, 1.0)
 
-
 def mappo_policy(obs, env, rng, agent):
     state = np.repeat(env.global_state()[None, :], env.num_drones, axis=0)
     a, _, _ = agent.act(obs, state, deterministic=True)
@@ -93,9 +104,13 @@ def run_policy(name, policy, world, args, agent=None):
         m = info["metrics"]
         row = {"policy": name, "episode": ep, "env_sps": round(m["steps"] / wall, 1)}
         row.update({k: m[k] for k in METRIC_KEYS})
+        comp = m.get("reward_components", {})
+        row.update({f"r_{k}": round(comp.get(k, 0.0) / env.num_drones, 3)
+                    for k in COMPONENT_KEYS})
         rows.append(row)
         print(f"  [{name}] ep {ep}: disc {m['discovered']:2d} conf {m['confirmed']:2d} "
               f"cov {m['coverage']:.3f} coll {m['collision_events']:3d} "
+              f"csteps {m['collision_steps']:4d} prox {m['proximity_steps']:4d} "
               f"rew {m['episode_reward_mean']:8.2f} | {row['env_sps']} env sps")
     return rows
 
@@ -112,6 +127,8 @@ def main():
     p.add_argument("--policy", choices=["random", "rule", "mappo"], default="random")
     p.add_argument("--compare", action="store_true", help="run all policies")
     p.add_argument("--checkpoint", default="")
+    p.add_argument("--label", default="mappo",
+                   help="row name for the checkpoint policy (e.g. bc, dagger, mappo)")
     p.add_argument("--drones", type=int, default=2)
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--seed", type=int, default=1000)
@@ -137,32 +154,50 @@ def main():
 
     policies = [("random", random_policy), ("rule", rule_policy)]
     if agent is not None:
-        policies.append(("mappo", mappo_policy))
+        policies.append((args.label, mappo_policy))
     if not args.compare:
-        policies = [(args.policy, {"random": random_policy, "rule": rule_policy,
-                                   "mappo": mappo_policy}[args.policy])]
-        if args.policy == "mappo" and agent is None:
-            raise SystemExit("--policy mappo requires --checkpoint")
+        if args.policy == "mappo":
+            if agent is None:
+                raise SystemExit("--policy mappo requires --checkpoint")
+            policies = [(args.label, mappo_policy)]
+        else:
+            policies = [(args.policy, {"random": random_policy,
+                                       "rule": rule_policy}[args.policy])]
 
     all_rows, summary = [], []
     for name, pol in policies:
         rows = run_policy(name, pol, world, args, agent)
         write_csv(out / f"eval_{name}.csv", rows)
         all_rows.extend(rows)
-        summary.append({"policy": name,
-                        **{k: round(float(np.mean([r[k] for r in rows])), 4) for k in METRIC_KEYS},
-                        "env_sps": round(float(np.mean([r["env_sps"] for r in rows])), 1)})
+        summary.append({
+            "policy": name,
+            **{k: round(float(np.mean([r[k] for r in rows])), 4) for k in METRIC_KEYS},
+            **{f"r_{k}": round(float(np.mean([r[f"r_{k}"] for r in rows])), 3)
+               for k in COMPONENT_KEYS},
+            "env_sps": round(float(np.mean([r["env_sps"] for r in rows])), 1),
+        })
     write_csv(out / "comparison.csv", summary)
+
     print("\n=== comparison (mean over episodes) ===")
     for s in summary:
-        print(s)
+        print({k: v for k, v in s.items() if not k.startswith("r_")})
+
+    print("\n=== reward breakdown (per-drone mean; sums to episode_reward_mean) ===")
+    for s in summary:
+        parts = [f"{k} {s[f'r_{k}']:+.2f}" for k in COMPONENT_KEYS
+                 if abs(s[f"r_{k}"]) > 0.005]
+        total = sum(s[f"r_{k}"] for k in COMPONENT_KEYS)
+        print(f"  {s['policy']:8s}: " + " | ".join(parts) + f"   [sum {total:+.2f}]")
+
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+
         keys = ["discovered", "confirmed", "coverage", "collision_events",
-                "redundant_fraction", "episode_reward_mean"]
-        fig, axes = plt.subplots(2, 3, figsize=(13, 7))
+                "collision_steps", "proximity_steps", "redundant_fraction",
+                "episode_reward_mean"]
+        fig, axes = plt.subplots(2, 4, figsize=(16, 7))
         names = [s["policy"] for s in summary]
         for ax, k in zip(axes.flat, keys):
             ax.bar(names, [s[k] for s in summary])
@@ -170,6 +205,23 @@ def main():
         fig.tight_layout()
         fig.savefig(out / "comparison.png", dpi=140)
         print(f"graphs -> {out / 'comparison.png'}")
+
+        # reward-component breakdown figure
+        fig2, ax2 = plt.subplots(figsize=(13, 6))
+        x = np.arange(len(COMPONENT_KEYS))
+        width = 0.8 / max(len(summary), 1)
+        for i, s in enumerate(summary):
+            ax2.bar(x + i * width, [s[f"r_{k}"] for k in COMPONENT_KEYS],
+                    width, label=s["policy"])
+        ax2.set_xticks(x + width * (len(summary) - 1) / 2)
+        ax2.set_xticklabels(COMPONENT_KEYS, rotation=45, ha="right")
+        ax2.axhline(0.0, color="black", linewidth=0.8)
+        ax2.set_ylabel("reward contribution per drone (episode sum)")
+        ax2.set_title("Reward component breakdown")
+        ax2.legend()
+        fig2.tight_layout()
+        fig2.savefig(out / "components.png", dpi=140)
+        print(f"graphs -> {out / 'components.png'}")
     except ImportError:
         print("matplotlib not installed -- CSV only (pip install matplotlib for graphs)")
 

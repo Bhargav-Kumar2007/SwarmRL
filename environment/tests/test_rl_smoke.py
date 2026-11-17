@@ -1,11 +1,11 @@
 """Smoke tests for the SwarmRL lightweight RL layer (no torch / mujoco needed).
 
-Run from the repo root:  python tests/test_rl_smoke.py
+Run from the repo root:  python environment/tests/test_rl_smoke.py
 """
 import sys, time
 from pathlib import Path
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "environment"))
+ENVIRONMENT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ENVIRONMENT_DIR))
 import numpy as np
 from rl.world import StaticWorld, Arena
 from rl.swarm_env import SwarmEnv, VecSwarmEnv, EnvConfig

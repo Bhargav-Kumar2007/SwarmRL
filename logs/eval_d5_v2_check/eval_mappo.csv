@@ -1,0 +1,2 @@
+policy,episode,env_sps,discovered,confirmed,collision_events,coverage,mission_time_s,redundant_fraction,episode_reward_mean,proximity_steps,collision_steps,r_discover,r_confirm,r_coop,r_personal_faint,r_approach,r_new_cell,r_revisit,r_collision,r_separation,r_fire,r_idle,r_time,r_safe,r_team_bonus
+mappo,0,28.1,1,1,1,0.060546875,240.0,0.8695652173913043,0.3559999999999512,0,10,1.0,5.0,0.0,0.02,0.0,0.912,-0.76,-2.0,0.0,0.0,-3.668,-6.0,2.396,3.456

@@ -1,0 +1,2 @@
+policy,episode,env_sps,discovered,confirmed,collision_events,coverage,mission_time_s,redundant_fraction,episode_reward_mean
+mappo,0,102.4,0,0,0,0.095703125,240.0,0.30935251798561153,0.7849999999999504

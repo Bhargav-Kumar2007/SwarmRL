@@ -1,0 +1,2 @@
+policy,episode,env_sps,discovered,confirmed,collision_events,coverage,mission_time_s,redundant_fraction,episode_reward_mean
+rule,0,57.9,2,2,0,0.0419921875,240.0,0.10869565217391304,10.934999999999867

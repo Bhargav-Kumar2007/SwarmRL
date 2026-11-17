@@ -4,11 +4,11 @@ import sys
 from pathlib import Path
 from dataclasses import dataclass
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def add_repo_paths():
-    for p in (str(ROOT), str(ROOT / "environment"), str(ROOT / "training")):
+    for p in (str(ROOT), str(ROOT / "environment"), str(ROOT / "environment" / "training")):
         if p not in sys.path:
             sys.path.insert(0, p)
 

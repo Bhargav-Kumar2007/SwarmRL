@@ -1,16 +1,16 @@
 """Visual inference demo: trained MAPPO swarm in the existing MuJoCo viewer.
 
-  python demonstrations/run_trained_swarm.py --checkpoint checkpoints/d2_seed0/final.pt --drones 2
-  python demonstrations/run_trained_swarm.py --checkpoint checkpoints/stage_d50/final.pt --drones 50 --loop
-  python demonstrations/run_trained_swarm.py --policy rule --drones 10
+  python environment/training/demonstrations/run_trained_swarm.py --checkpoint checkpoints/d2_seed0/final.pt --drones 2
+  python environment/training/demonstrations/run_trained_swarm.py --checkpoint checkpoints/stage_d50/final.pt --drones 50 --loop
+  python environment/training/demonstrations/run_trained_swarm.py --policy rule --drones 10
 """
 import argparse
 import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-for p in (str(ROOT), str(ROOT / "environment"), str(ROOT / "training")):
+ROOT = Path(__file__).resolve().parents[3]
+for p in (str(ROOT), str(ROOT / "environment"), str(ROOT / "environment" / "training")):
     if p not in sys.path:
         sys.path.insert(0, p)
 

@@ -71,7 +71,17 @@ class MAPPO:
         }, path)
 
     def load(self, path):
-        ck = torch.load(path, map_location=self.device)
+        # Checkpoints store NumPy arrays for the running normalization stats.
+        # PyTorch 2.6+ defaults to weights-only loading, so allowlist only the
+        # NumPy types needed to restore those arrays while keeping safe loading.
+        safe_numpy_types = [
+            np._core.multiarray._reconstruct,
+            np.ndarray,
+            np.dtype,
+            np.dtypes.Float64DType,
+        ]
+        with torch.serialization.safe_globals(safe_numpy_types):
+            ck = torch.load(path, map_location=self.device, weights_only=True)
         assert ck["obs_dim"] == self.obs_dim and ck["state_dim"] == self.state_dim, \
             "observation dims changed -- checkpoint incompatible"
         self.actor.load_state_dict(ck["actor"])
